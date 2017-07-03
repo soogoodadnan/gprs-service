@@ -1,0 +1,379 @@
+package com.example.hp.kidapp.communication.Utills.GpsService;
+
+
+        import android.app.Service;
+        import android.content.Intent;
+        import android.location.Location;
+        import android.os.Bundle;
+        import android.os.IBinder;
+        import android.util.Log;
+
+        import com.google.android.gms.common.ConnectionResult;
+        import com.google.android.gms.common.api.GoogleApiClient;
+        import com.google.android.gms.location.LocationListener;
+        import com.google.android.gms.location.LocationRequest;
+        import com.google.android.gms.location.LocationServices;
+
+        import org.json.JSONArray;
+        import org.json.JSONObject;
+
+        import java.util.ArrayList;
+        import java.util.Calendar;
+        import java.util.List;
+
+
+/**
+ * Created by HP on 2/28/2017.
+ */
+
+public class GPSService
+        extends Service
+        implements GoogleApiClient.ConnectionCallbacks, GoogleApiClient.OnConnectionFailedListener, LocationListener {
+
+    public static final String KEY_ACTION = "actions";
+    public static final int COMMAND_START_LOCATION = 3455;
+    public static final int COMMAND_STOP_LOCATION = 3755;
+    private static final String TAG = GPSService.class.getName();
+    private static int UPDATE_INTERVAL = 00000; // 10 sec
+    private static int FASTEST_INTERVAL = 0000; // 5 sec
+    private static int DISPLACEMENT = 0; // 1 meters
+    private Location myLastLocation;
+    private GoogleApiClient mGoogleApiClient;
+    private LocationRequest mLocationRequest;
+
+    private List<LocationPoint> locationPointList;
+    private JSONArray locPointsJArray;
+    private JSONObject mainObj;
+
+    private Intent bi = new Intent("com.synergistics.sayarti.sayarti_br");
+
+    public GPSService() {
+    }
+
+    @Override
+    public IBinder onBind(Intent intent) {
+        return null;
+    }
+
+    @Override
+    public int onStartCommand(Intent intent, int flags, int startId) {
+        if (intent == null) return START_STICKY;
+        switch (intent.getIntExtra(KEY_ACTION, -1)) {
+            case COMMAND_START_LOCATION:
+                startLocationUpdates();
+                break;
+            case COMMAND_STOP_LOCATION:
+                stopLocationUpdates();
+                stopSelf();
+                break;
+        }
+        return START_STICKY;
+    }
+
+    protected synchronized void buildGoogleApiClient() {
+        mGoogleApiClient = new GoogleApiClient.Builder(this)
+                .addConnectionCallbacks(this)
+                .addOnConnectionFailedListener(this)
+                .addApi(LocationServices.API).build();
+    }
+
+    protected void createLocationRequest() {
+        locationPointList = new ArrayList<LocationPoint>();
+
+        mLocationRequest = new LocationRequest();
+        mLocationRequest.setInterval(UPDATE_INTERVAL);
+        mLocationRequest.setFastestInterval(FASTEST_INTERVAL);
+        mLocationRequest.setPriority(LocationRequest.PRIORITY_HIGH_ACCURACY);
+//        mLocationRequest.setSmallestDisplacement(DISPLACEMENT); // 10 meters
+    }
+
+    @SuppressWarnings("ResourceType")
+    protected void startLocationUpdates() {
+        if (mGoogleApiClient == null) {
+            buildGoogleApiClient();
+            createLocationRequest();
+            return;
+        }
+        if (!mGoogleApiClient.isConnected()) {
+            mGoogleApiClient.connect();
+            return;
+        }
+        LocationServices.FusedLocationApi.requestLocationUpdates(
+                mGoogleApiClient, mLocationRequest, this);
+    }
+
+    @Override
+    public void onDestroy() {
+        super.onDestroy();
+        stopSelf();
+        stopLocationUpdates();
+    }
+
+    protected void stopLocationUpdates() {
+        LocationServices.FusedLocationApi.removeLocationUpdates(mGoogleApiClient, this);
+    }
+
+    @Override
+    public void onCreate() {
+        super.onCreate();
+        buildGoogleApiClient();
+        createLocationRequest();
+        if (mGoogleApiClient != null) {
+            mGoogleApiClient.connect();
+        }
+    }
+
+    @Override
+    public void onConnectionFailed(ConnectionResult result) {
+        Log.i(TAG, "Connection failed: ConnectionResult.getErrorCode() = " + result.getErrorCode());
+    }
+
+    @Override
+    public void onConnected(Bundle arg0) {
+        startLocationUpdates();
+    }
+
+    @Override
+    public void onConnectionSuspended(int arg0) {
+        mGoogleApiClient.connect();
+    }
+
+    @Override
+    public void onLocationChanged(Location location) {
+        sendBroadcast(bi);
+        //EventBus.getDefault().post(new UpdateLocation(location));
+
+//        System.out.println("Battery Status: " + batteryStatus() + "%");
+//        if (batteryStatus()<40){
+//            stopLocationUpdates();
+//            stopSelf();
+//        }
+        System.out.println("Lat: " + location.getLatitude() + " Lng: " + location.getLongitude());
+
+        if (myLastLocation == null || locationPointList.size() == 0) {
+            myLastLocation = location;
+            LocationPoint locationPoint = new LocationPoint();
+            locationPoint.setLatitude(location.getLatitude());
+            locationPoint.setLongitude(location.getLongitude());
+            Calendar cal = Calendar.getInstance();
+            locationPoint.setTimestamp(cal.getTime().toString());
+            locationPointList.add(locationPoint);
+        }
+
+        float distance = myLastLocation.distanceTo(location);
+
+        if (distance>=100) {
+            LocationPoint locationPoint = new LocationPoint();
+            locationPoint.setLatitude(location.getLatitude());
+            locationPoint.setLongitude(location.getLongitude());
+            Calendar cal = Calendar.getInstance();
+            locationPoint.setTimestamp(cal.getTime().toString());
+            locationPointList.add(locationPoint);
+
+            System.out.println("==LAST==:" + myLastLocation.getLatitude() + "; " + myLastLocation.getLongitude());
+            System.out.println("==CURRENT==:" + location.getLatitude() + "; " + location.getLongitude());
+            System.out.println("==DISTANCE==:" + distance);
+
+            myLastLocation = location;
+        }
+
+        if (locationPointList.size() >= 10) {
+//            saveLocationPointsViaHTTP();
+        }
+    }
+
+//    private void saveLocationPointsOnServer() {
+//        Retrofit mRetrofit = new Retrofit.Builder()
+//                .baseUrl(APIUtils.SERVER_URL)
+//                .addConverterFactory(GsonConverterFactory.create())
+//                .client(defaultOkHttpClient())
+//                .build();
+//
+//        String emailEncrypted = AESEncryption.encode("Synergistics001", SignInData.getProfile(getApplicationContext()).getEmail());
+//        JSONArray locPointsJArray = new JSONArray();
+//        for (int i = 0; i < locationPointList.size(); i++) {
+//            try {
+//                JSONObject jsonObject = new JSONObject();
+//                jsonObject.put("latitude", locationPointList.get(i).getLatitude());
+//                jsonObject.put("longitude", locationPointList.get(i).getLongitude());
+//                jsonObject.put("timestamp", locationPointList.get(i).getTimestamp());
+//                locPointsJArray.put(jsonObject);
+//            } catch (JSONException e) {
+//                e.printStackTrace();
+//            }
+//        }
+//
+//        JsonObject postParam = new JsonObject();
+//        postParam.addProperty("userId", emailEncrypted);
+//        postParam.addProperty("points", locPointsJArray.toString());
+//
+//        RequestSaveLocationPoints api = mRetrofit.create(RequestSaveLocationPoints.class);
+//
+////        Call<UpdateResponse> call = api.saveLocationPoints(postParam);
+//  //      call.enqueue(new Callback<UpdateResponse>() {
+////            @Override
+////            public void onResponse(Call<UpdateResponse> callback, Response<UpdateResponse> response) {
+////                UpdateResponse res = response.body();
+////                System.out.println("==SUCCESS===" + res.getMessage());
+////                locationPointList = new ArrayList<LocationPoint>();
+////            }
+//
+//            @Override
+//            public void onFailure(Call<UpdateResponse> call, Throwable t) {
+//                System.out.println("==ERROR===" + t.toString());
+//            }
+//        });
+//    }
+
+//    private static OkHttpClient defaultOkHttpClient() {
+//        OkHttpClient.Builder client = new OkHttpClient.Builder();
+//        client.connectTimeout(15000, TimeUnit.MILLISECONDS);
+//        client.readTimeout(15000, TimeUnit.MILLISECONDS);
+//        client.writeTimeout(15000, TimeUnit.MILLISECONDS);
+//        client.interceptors().add(new LoggingInterceptor());
+//        return client.build();
+//    }
+////
+//    private void saveLocationPointsViaHTTP() {
+//        try {
+////          //  String emailEncrypted = AESEncryption.encode("Synergistics001", SignInData.getProfile(getApplicationContext()).getEmail());
+////            locPointsJArray = new JSONArray();
+////            mainObj = new JSONObject();
+////            mainObj.put("userId", emailEncrypted);
+////            if (locationPointList != null) {
+////                for (int i = 0; i < locationPointList.size(); i++) {
+////                    JSONObject object = new JSONObject();
+////                    object.put("latitude", locationPointList.get(i).getLatitude());
+////                    object.put("longitude", locationPointList.get(i).getLongitude());
+////                    object.put("timestamp", locationPointList.get(i).getTimestamp());
+////                    object.put("background", "NO");
+////                    locPointsJArray.put(object);
+////                }
+////                mainObj.put("points", locPointsJArray);
+////            }
+////        } catch (JSONException e) {
+//////            e.printStackTrace();
+////        }
+//
+//        new HttpAsyncTask().execute("https://sayartiuae.com/api/save_location_points");
+//
+//    }
+
+//    private class HttpAsyncTask extends AsyncTask<String, Void, String> {
+//        @Override
+//        protected void onPreExecute() {
+//            super.onPreExecute();
+//        }
+//
+//        @Override
+//        protected String doInBackground(String... urls) {
+//            InputStream inputStream = null;
+//            String result = "";
+//            try {
+//                HostnameVerifier hostnameVerifier = org.apache.http.conn.ssl.SSLSocketFactory.ALLOW_ALL_HOSTNAME_VERIFIER;
+//                DefaultHttpClient client = new DefaultHttpClient();
+//                SchemeRegistry registry = new SchemeRegistry();
+//                SSLSocketFactory socketFactory = SSLSocketFactory.getSocketFactory();
+//                socketFactory.setHostnameVerifier((X509HostnameVerifier) hostnameVerifier);
+//                registry.register(new Scheme("https", socketFactory, 443));
+//                SingleClientConnManager mgr = new SingleClientConnManager(client.getParams(), registry);
+//                DefaultHttpClient httpClient = new DefaultHttpClient(mgr, client.getParams());
+//                HttpsURLConnection.setDefaultHostnameVerifier(hostnameVerifier);
+//
+//                HttpPost httpPost = new HttpPost(urls[0]);
+//                String json = "";
+//                json = mainObj.toString();
+//                System.out.println("===JSON==="+mainObj.toString());
+//                StringEntity se = new StringEntity(json);
+//                httpPost.setEntity(se);
+//                httpPost.setHeader("Accept", "application/json");
+//                httpPost.setHeader("Content-type", "application/json");
+//                HttpResponse httpResponse = httpClient.execute(httpPost);
+//                inputStream = httpResponse.getEntity().getContent();
+//                if (inputStream != null)
+//                    result = convertInputStreamToString(inputStream);
+//                else
+//                    result = "Did not work!";
+//            } catch (Exception e) {
+//                System.out.println("==exception==" + e.toString());
+//            }
+//            return result;
+//        }
+//
+//        @Override
+//        protected void onPostExecute(String result) {
+//            System.out.println("===HTTP==" + result);
+//            try {
+//                JSONObject jsonObject = new JSONObject(result);
+//                if (jsonObject.getString("status").equalsIgnoreCase("Success")) {
+//                    locationPointList = new ArrayList<LocationPoint>();
+//                    System.out.println("===" + (jsonObject.getString("status") + "     " + jsonObject.getString("msg") + "     "));
+//                } else {
+//                    System.out.println("===" + (jsonObject.getString("status") + "     " + jsonObject.getString("msg") + "     "));
+//                }
+//            } catch (JSONException e) {
+//            }
+//        }
+//    }
+
+//    private static String convertInputStreamToString(InputStream inputStream) throws IOException {
+//        BufferedReader bufferedReader = new BufferedReader(new InputStreamReader(inputStream));
+//        String line = "";
+//        String result = "";
+//        while ((line = bufferedReader.readLine()) != null)
+//            result += line;
+//        inputStream.close();
+//        return result;
+//    }
+//
+//    private float batteryStatus(){
+//        IntentFilter iFilter = new IntentFilter(Intent.ACTION_BATTERY_CHANGED);
+//        Intent batteryStatus = registerReceiver(null, iFilter);
+//        int level = 0;
+//        int scale = 0;
+//        if (batteryStatus != null) {
+//            level = batteryStatus.getIntExtra(BatteryManager.EXTRA_LEVEL, -1);
+//            scale = batteryStatus.getIntExtra(BatteryManager.EXTRA_SCALE, -1);
+//        }
+//        float batteryPct = level / (float)scale;
+//        return batteryPct*100;
+//    }
+
+    /**
+     * Created by HP on 2/28/2017.
+     */
+    public static class LocationPoint {
+
+        private double longitude;
+
+        public String getTimestamp() {
+            return timestamp;
+        }
+
+        public void setTimestamp(String timestamp) {
+            this.timestamp = timestamp;
+        }
+
+        public double getLatitude() {
+            return latitude;
+        }
+
+        public void setLatitude(double latitude) {
+            this.latitude = latitude;
+        }
+
+        public double getLongitude() {
+            return longitude;
+        }
+
+        public void setLongitude(double longitude) {
+            this.longitude = longitude;
+        }
+
+        private double latitude;
+        private String timestamp;
+
+
+
+    }
+}
